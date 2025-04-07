@@ -1,0 +1,16 @@
+dataset,subset,model,sample_index,workload_type,input_tokens,generated_tokens,total_tokens,prompt_tps,generation_tps,workload_ratio,peak_memory
+wikitext,wikitext-103-v1,mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit,0,decode-heavy,40,256,296,181.66,81.02,0.135,0.769
+wikitext,wikitext-103-v1,mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit,0,decode-heavy,43,821,864,190.26,80.81,0.05,0.773
+cnn_dailymail,3.0.0,mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit,0,prefill-heavy,4790,200,4990,428.49,52.71,0.96,1.454
+cnn_dailymail,3.0.0,mlx-community/Mistral-7B-Instruct-v0.3-4bit,0,prefill-heavy,4644,250,4894,74.2,7.48,0.949,5.243
+cnn_dailymail,3.0.0,mlx-community/Mistral-7B-Instruct-v0.3-4bit,1,prefill-heavy,3252,250,3502,45.69,6.03,0.929,5.243
+wikitext,wikitext-103-v1,mlx-community/Mistral-7B-Instruct-v0.3-4bit,0,decode-heavy,31,571,602,49.41,12.36,0.051,4.223
+wikitext,wikitext-103-v1,mlx-community/Mistral-7B-Instruct-v0.3-4bit,1,decode-heavy,36,717,753,54.14,11.33,0.048,4.223
+cnn_dailymail,3.0.0,mlx-community/gemma-2-2b-it-4bit,0,prefill-heavy,4222,250,4472,309.63,23.5,0.944,2.405
+cnn_dailymail,3.0.0,mlx-community/gemma-2-2b-it-4bit,1,prefill-heavy,2924,250,3174,271.74,26.25,0.921,2.811
+wikitext,wikitext-103-v1,mlx-community/gemma-2-2b-it-4bit,0,decode-heavy,31,152,183,152.28,32.58,0.169,1.553
+wikitext,wikitext-103-v1,mlx-community/gemma-2-2b-it-4bit,1,decode-heavy,34,594,628,119.98,31.0,0.054,1.564
+cnn_dailymail,3.0.0,mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit,0,prefill-heavy,4793,250,5043,432.77,53.43,0.95,1.456
+cnn_dailymail,3.0.0,mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit,1,prefill-heavy,3368,250,3618,434.33,62.36,0.931,1.506
+wikitext,wikitext-103-v1,mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit,0,decode-heavy,43,821,864,250.16,79.56,0.05,0.773
+wikitext,wikitext-103-v1,mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit,1,decode-heavy,47,1000,1047,305.69,74.87,0.045,0.773
