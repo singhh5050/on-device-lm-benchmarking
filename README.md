@@ -32,6 +32,8 @@ These phases have fundamentally different performance characteristics:
 - Ollama demonstrates remarkably higher prompt processing speeds, especially for TinyLlama
 - Mistral shows the smallest difference between prompt and generation speeds in both frameworks
 
+The graph shows that prefill-heavy workloads achieve significantly higher prompt TPS by amortizing fixed overheads—like weight loading and I/O—across many input tokens. This efficient batching pushes the blue dots far to the right. While their generation TPS is often lower than that of decode-heavy workloads, the prompt phase dominates their performance profile, highlighting how processing many tokens in one pass leads to much greater efficiency during input handling. Conversely, the red dots are pushed to the left because decode-heavy tasks are not optimized for prompt TPS, and the I/O speed of decoding will be the same across both groups. (Change in prompt TPS, static decode TPS = different proportions)
+
 ### Model Performance Comparison
 
 ![MLX Model TPS Comparison](visualizations/mlx/3_model_tps_comparison.png)
@@ -57,10 +59,10 @@ These phases have fundamentally different performance characteristics:
 ![Workload Performance Comparison](visualizations/comparison/4_workload_performance_comparison.png)
 *Performance comparison by workload type between frameworks*
 
-**Key Insights:**
+**Key Thoughts:**
 
 1. **Generation Performance**:
-   - MLX has significantly better generation performance for TinyLlama (~69 vs ~47 tokens/sec)
+   - MLX has better generation performance for TinyLlama (~69 vs ~47 tokens/sec)
    - Gemma and Mistral show similar generation performance across frameworks
    - MLX appears optimized for generation tasks, especially with smaller models
 
@@ -73,29 +75,19 @@ These phases have fundamentally different performance characteristics:
    - MLX shows higher median performance for decode-heavy tasks
    - Both frameworks perform similarly on prefill-heavy tasks
    - MLX exhibits greater performance variability across both workload types
+  
+**Some Nuances:**
 
-## Practical Implications
+1. **MLX-LM Package**:
+   - We used the MLX-LM high-level package rather than coding MLX from scratch
+   - This abstraction layer might introduce extra processing time and performance variability
+   - Results may differ from optimized implementations built directly on the core MLX framework
 
-Based on these benchmark results, developers should consider:
 
-1. **Framework Selection Based on Task Type**:
-   - For applications requiring extensive text generation (decode-heavy), MLX may offer better performance
-   - For applications processing large inputs with shorter outputs (prefill-heavy), Ollama provides comparable performance with better consistency
-
-2. **Model Selection Trade-offs**:
-   - TinyLlama shows the greatest performance difference between frameworks
-   - Mistral performs similarly on both frameworks but is significantly slower
-   - Gemma offers a balanced middle ground with consistent performance
-
-3. **On-Device Optimization Strategies**:
-   - Minimize input length where possible to improve overall performance
-   - Consider the full end-to-end latency rather than just tokens per second
-   - Model size has a significant impact on both frameworks' performance
+2. **Sample Size**:
+   - Benchmarks were conducted with only 2 samples per model and dataset combination
+   - Limited sample size may not fully represent real-world performance characteristics
 
 ## Conclusion
 
-The performance characteristics of language models on-device vary significantly based on the framework, model size, and workload type. While tokens per second is a useful comparison metric, real-world performance should consider end-to-end latency, memory usage, and consistency under various workloads.
-
-MLX shows advantages in generation speed, particularly with smaller models, while Ollama offers more consistent performance and superior prompt processing. The choice between frameworks should be guided by the specific requirements of your application.
-
-For full benchmarking details and to run your own comparisons, see the [MLX_README.md](README_MLX.md) and run the benchmarking scripts included in this repository.
+MLX shows advantages in generation speed, particularly with smaller models, while Ollama offers more consistent performance and superior prompt processing.
