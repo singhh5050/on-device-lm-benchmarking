@@ -48,7 +48,7 @@ These phases have fundamentally different performance characteristics, and our a
 ![Cloud Energy vs Prefill Length](visualizations/prefill_results/prefill_vs_cloud_energy.png)
 *Estimated cloud energy consumption across prefill lengths and models*
 
-**Key Insights:**
+**Key Thoughts:**
 
 1. **Energy Consumption Pattern**: Both on-device and cloud energy follow a similar pattern - relatively stable until ~1500 tokens, then sharply increasing for 2000 tokens.
 
