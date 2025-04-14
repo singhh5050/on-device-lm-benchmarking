@@ -60,13 +60,13 @@ These phases have fundamentally different performance characteristics. Ideally, 
 
 ### Quantization Effects Analysis
 
-![Quantization vs Latency](visualizations/quant_results/latency_vs_quantization.png)
+![Quantization vs Latency](visualizations/quant_results/quantization_vs_latency.png)
 *Impact of quantization level on inference latency*
 
-![Quantization vs On-Device Energy](visualizations/quant_results/ondevice_energy_vs_quantization.png)
+![Quantization vs On-Device Energy](visualizations/quant_results/quantization_vs_on_device.png)
 *Impact of quantization on on-device energy consumption*
 
-![Quantization vs Cloud Energy](visualizations/quant_results/cloud_energy_vs_quantization.png)
+![Quantization vs Cloud Energy](visualizations/quant_results/quantization_cloud_energy.png)
 *Impact of quantization on estimated cloud energy consumption*
 
 **Key Findings:**
