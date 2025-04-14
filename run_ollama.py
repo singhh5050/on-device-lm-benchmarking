@@ -1,249 +1,204 @@
 import time
 import csv
 import os
-import ollama  # Fix: Import the entire ollama module, not just generate
+import ollama
 import requests
 from datasets import load_dataset
+from transformers import AutoTokenizer
+from utils.energy_tracking import PowerMonitorContext, cloud_inference_energy_estimate_w_model_attributes
+
+# MODE
+MODE = "quant"  # or "prefill"
 
 # Create results directory
 os.makedirs("results", exist_ok=True)
-OUTPUT_CSV = "results/ollama_results.csv"
+OUTPUT_CSV = f"results/ollama_{MODE}_results2.csv"
 
-# Define models to test (Ollama model names)
-MODELS = [
-    "tinyllama:latest",  # Start with smaller models first
-    "phi:latest",        # Another small model option
-    "gemma:2b",          # Medium sized model
-    "mistral:latest",    # Larger model - last option
-]
+# Pick models supported by ollama
+if MODE == "prefill":
+    MODELS = [
+        "tinyllama:latest",
+        "phi:latest",
+        "gemma:2b",
+        "mistral:latest",
+    ]
+elif MODE == "quant":
+    MODELS = [
+        # "mistral:latest",
+        # "mistral:7b-instruct-q5_1",
+        "mistral:7b-instruct-q8_0",
+    ]
+else:
+    raise ValueError("MODE must be 'prefill' or 'quant'")
 
-# Define a simple fallback model if others fail
-FALLBACK_MODEL = "phi:latest"  # Known to be small and work reliably
 
-# Define datasets and workload types
-DATASETS = [
-    ("cnn_dailymail", "3.0.0", "prefill-heavy"),
-    ("wikitext", "wikitext-103-v1", "decode-heavy"),
-]
+MODEL_TOKENIZERS = {
+    "tinyllama": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "phi": "microsoft/phi-2",
+    "gemma": "google/gemma-2-2b",
+    "mistral": "mistralai/Mistral-7B-Instruct-v0.1",
+}
 
-# Prepare CSV output
+DATASET_NAME = "cnn_dailymail"
+DATASET_CONFIG = "3.0.0"
+
 with open(OUTPUT_CSV, "w") as f:
     writer = csv.writer(f)
     writer.writerow([
-        "dataset", "subset", "model", "sample_index", "workload_type",
-        "input_tokens", "generated_tokens", "total_tokens", "workload_ratio",
-        "prompt_tps", "generation_tps", "load_time_s", "total_time_s"
+        "model",
+        "input_tokens", "generated_tokens", "total_tokens", "workload_type", "workload_ratio",
+        "prompt_tps", "generation_tps", "load_time_s", "total_time_s",
+        "on_device_energy_J", "on_device_power_W",
+        "cloud_energy_J", "cloud_power_W"
     ])
 
-# Main benchmarking function
-def benchmark_model(model, dataset_name, subset, workload_type, num_samples=2):
-    print(f"\n=== Running: {model} on {dataset_name} ({workload_type}) ===")
-    
-    # Load dataset
-    print(f"📚 Loading {num_samples} samples from {dataset_name}...")
+def get_tokenizer(model_name):
+    for key in MODEL_TOKENIZERS:
+        if model_name.startswith(key):
+            return AutoTokenizer.from_pretrained(MODEL_TOKENIZERS[key])
+    raise ValueError(f"No tokenizer mapping for model: {model_name}")
+
+def benchmark_model(model, prefill_tokens, decode_tokens, workload):
+    print(f"\n=== Running benchmark for {model} ===")
+    print(f"📚 Loading sample from {DATASET_NAME}...")
     try:
-        if subset:
-            dataset = load_dataset(dataset_name, subset, split=f"validation[:{num_samples*5}]")
-        else:
-            dataset = load_dataset(dataset_name, split=f"validation[:{num_samples*5}]")
+        dataset = load_dataset(DATASET_NAME, DATASET_CONFIG, split="validation[:1]")
     except ValueError:
-        # Fallback to train split
         print("Validation split not found, falling back to train split...")
-        if subset:
-            dataset = load_dataset(dataset_name, subset, split=f"train[:{num_samples*5}]")
-        else:
-            dataset = load_dataset(dataset_name, split=f"train[:{num_samples*5}]")
-    
-    # Process each sample
-    for i in range(min(num_samples, len(dataset))):
-        # Create prompt based on workload type
-        if workload_type == "prefill-heavy":
-            # Combine multiple articles for a longer context
-            combined_text = ""
-            for j in range(min(5, len(dataset) - i)):
-                idx = i * 5 + j
-                if idx < len(dataset):
-                    sample = dataset[idx]
-                    text = sample.get("article") or sample.get("text") or sample.get("content") or sample.get("context") or str(sample)
-                    combined_text += f"\nArticle {j+1}:\n{text}\n"
-            prompt_text = combined_text
-            instruction = "Summarize all the above articles in 1-2 sentences each."
-        else:
-            # For decode-heavy, use single samples
-            sample = dataset[i]
-            prompt_text = sample.get("article") or sample.get("text") or sample.get("content") or sample.get("context") or str(sample)
-            instruction = "Write a detailed analysis with multiple paragraphs."
-        
-        # Format prompt
-        full_prompt = f"{instruction}\n\n{prompt_text}"
-        
-        print(f"\n🧪 Sample {i+1}/{num_samples}")
-        
-        # Use ollama library to generate response
-        try:
-            # Make sure we're not streaming and we want the full response
-            start_time = time.time()
-            
-            # Use the generate() function from the ollama library
+        dataset = load_dataset(DATASET_NAME, DATASET_CONFIG, split="train[:1]")
+
+    text = ""
+    for i in range(min(50, len(dataset))):
+        sample = dataset[i]
+        article_text = sample.get("article") or sample.get("text") or str(sample)
+        text += article_text.strip() + "\n\n"
+
+    instruction = ""
+    if workload == "prefill":
+        instruction = "Summarize this information in a few sentences: "
+    elif workload == "decode":
+        instruction = "Continue the story, generating as much as you physically can (pages upon pages) - don't stop. Extrapolate: "
+    else:
+        raise ValueError("Workload must either be 'prefill' or 'decode'")
+
+    tokenizer = get_tokenizer(model)
+    MIN_TOKENS_NEEDED = max([512, 1024, 1536, 2048])
+    while len(tokenizer.encode(text, add_special_tokens=False)) < MIN_TOKENS_NEEDED:
+        text += text
+
+    full_prompt = f"{instruction}\n\n{text}"
+    tokenized_prompt = tokenizer.encode(full_prompt, add_special_tokens=False)
+    print(f"🧮 Raw prompt token length before truncation: {len(tokenized_prompt)}")
+    truncated_prompt_tokens = tokenized_prompt[:prefill_tokens]
+    truncated_prompt = tokenizer.decode(truncated_prompt_tokens, skip_special_tokens=True)
+
+    print(f"🧪 Running benchmark")
+    try:
+        with PowerMonitorContext(mode="mac") as monitor:
             response = ollama.generate(
                 model=model,
-                prompt=full_prompt,
+                prompt=truncated_prompt,
                 options={
-                    'num_predict': 500 if workload_type == "decode-heavy" else 200
+                    'num_predict': decode_tokens
                 }
             )
-            end_time = time.time()
-            
-            # Extract metrics from response
-            metrics = {
-                'total_duration': response.get('total_duration', 0),
-                'load_duration': response.get('load_duration', 0),
-                'prompt_eval_count': response.get('prompt_eval_count', 0),
-                'prompt_eval_duration': response.get('prompt_eval_duration', 0),
-                'eval_count': response.get('eval_count', 0),
-                'eval_duration': response.get('eval_duration', 0),
-                'output_text': response.get('response', '')
-            }
-            
-            # Calculate derived metrics
-            input_tokens = metrics['prompt_eval_count']
-            generated_tokens = metrics['eval_count']
-            total_tokens = input_tokens + generated_tokens
-            workload_ratio = input_tokens / total_tokens if total_tokens > 0 else 0
-            
-            # Convert nanoseconds to seconds for time calculations
-            prompt_tps = metrics['prompt_eval_count'] / (metrics['prompt_eval_duration'] * 1e-9) if metrics['prompt_eval_duration'] > 0 else 0
-            generation_tps = metrics['eval_count'] / (metrics['eval_duration'] * 1e-9) if metrics['eval_duration'] > 0 else 0
-            load_time_s = metrics['load_duration'] * 1e-9
-            total_time_s = metrics['total_duration'] * 1e-9
-            
-            # Save results to CSV
-            with open(OUTPUT_CSV, "a") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    dataset_name, subset or "default", model, i, workload_type,
-                    input_tokens, generated_tokens, total_tokens, round(workload_ratio, 3),
-                    round(prompt_tps, 2), round(generation_tps, 2), 
-                    round(load_time_s, 3), round(total_time_s, 3)
-                ])
-            
-            # Print summary
-            print(f"📊 Stats Summary:")
-            print(f"📤 Input tokens: {input_tokens}")
-            print(f"📤 Generated tokens: {generated_tokens}")
-            print(f"📤 Total tokens: {total_tokens}")
-            print(f"📤 Workload ratio: {workload_ratio:.3f}")
-            print(f"📤 Prompt TPS: {prompt_tps:.2f}")
-            print(f"📤 Generation TPS: {generation_tps:.2f}")
-            print(f"📤 Total time: {total_time_s:.3f}s")
-            print(f"📤 Output preview: {metrics['output_text'][:100]}...\n")
-            
-        except Exception as e:
-            print(f"Error running benchmark for {model} on sample {i}: {e}")
 
-# Get available models
-def get_available_models():
-    """Get list of available models"""
-    try:
-        # Directly use the API endpoint to get models to avoid structure issues
-        response = requests.get("http://localhost:11434/api/tags")
-        if response.status_code == 200:
-            models_data = response.json()
-            # Extract model names from the response, handling different possible structures
-            if 'models' in models_data:
-                return [model['name'] for model in models_data['models']]
-            elif 'models' in models_data.get('tags', {}):  # Some versions use 'tags' container
-                return [model['name'] for model in models_data['tags']['models']]
-            elif isinstance(models_data, list):  # Some versions return a list directly
-                return [model['name'] for model in models_data if 'name' in model]
-            else:
-                print(f"Warning: Unexpected models list format: {models_data}")
-                return []
-        else:
-            print(f"Error getting models list: {response.status_code}")
-            return []
+        metrics = {
+            'total_duration': response.get('total_duration', 0),
+            'load_duration': response.get('load_duration', 0),
+            'prompt_eval_count': response.get('prompt_eval_count', 0),
+            'prompt_eval_duration': response.get('prompt_eval_duration', 0),
+            'eval_count': response.get('eval_count', 0),
+            'eval_duration': response.get('eval_duration', 0),
+            'output_text': response.get('response', '')
+        }
+
+        input_tokens = len(truncated_prompt_tokens)
+        generated_tokens = metrics['eval_count']
+        total_tokens = input_tokens + generated_tokens
+        workload_ratio = input_tokens / total_tokens if total_tokens > 0 else 0
+
+        prompt_tps = metrics['prompt_eval_count'] / (metrics['prompt_eval_duration'] * 1e-9) if metrics['prompt_eval_duration'] > 0 else 0
+        generation_tps = metrics['eval_count'] / (metrics['eval_duration'] * 1e-9) if metrics['eval_duration'] > 0 else 0
+        load_time_s = metrics['load_duration'] * 1e-9
+        total_time_s = metrics['total_duration'] * 1e-9
+
+        on_device_energy_metrics = monitor.get_final_estimates()
+        on_device_energy = on_device_energy_metrics.get("Measured Energy", "n/a")
+        on_device_power = on_device_energy_metrics.get("Average Measured Power", "n/a")
+        on_device_energy = float(on_device_energy.replace(" J", ""))
+        on_device_power = float(on_device_power.replace(" W", ""))
+
+        cloud_energy_metrics = cloud_inference_energy_estimate_w_model_attributes(
+            input_tokens=input_tokens,
+            output_tokens=generated_tokens,
+            inference_wall_time_sec=total_time_s
+        )
+
+        cloud_energy = cloud_energy_metrics["total_energy_joules"]
+        cloud_power = cloud_energy / total_time_s
+
+        with open(OUTPUT_CSV, "a") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                model,
+                input_tokens, generated_tokens, total_tokens, workload, round(workload_ratio, 3),
+                round(prompt_tps, 2), round(generation_tps, 2), 
+                round(load_time_s, 3), round(total_time_s, 3),
+                round(on_device_energy, 3), round(on_device_power, 3),
+                round(cloud_energy, 3), round(cloud_power, 3)
+            ])
+
+        print(f"📊 Stats Summary:")
+        print(f"📤 Workload: {workload}-heavy")
+        print(f"📤 Input tokens: {input_tokens}")
+        print(f"📤 Generated tokens: {generated_tokens}")
+        print(f"📤 Total tokens: {total_tokens}")
+        print(f"📤 Workload ratio: {workload_ratio:.3f}")
+        print(f"📤 Prompt TPS: {prompt_tps:.2f}")
+        print(f"📤 Generation TPS: {generation_tps:.2f}")
+        print(f"📤 Total time: {total_time_s:.3f}s")
+        print(f"📤 On Device Energy: {on_device_energy:.3f} J")
+        print(f"📤 On Device Power: {on_device_power:.3f} W")
+        print(f"📤 Cloud Energy: {cloud_energy:.3f} J")
+        print(f"📤 Cloud Power: {cloud_power:.3f} W")
+        print(f"📤 Output preview: {metrics['output_text'][:100]}...\n")
+
     except Exception as e:
-        print(f"Error listing models: {str(e)}")
-        return []
+        print(f"Error running benchmark for {model}: {e}")
 
-# Download a model
-def download_model(model_name, timeout=600):  # 10-minute timeout
-    """Download a model if not already available"""
+def is_model_available(model_name):
     try:
-        print(f"⬇️ Downloading model: {model_name}...")
-        print(f"This may take several minutes. Please be patient.")
-        
-        # Use a session with timeout
-        session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(max_retries=3)
-        session.mount('http://', adapter)
-        
-        # First check if model already exists in a different format
-        base_model = model_name.split(':')[0]
-        response = session.get("http://localhost:11434/api/tags", timeout=10)
+        response = requests.get("http://localhost:11434/api/tags")
         if response.status_code == 200:
             data = response.json()
             all_models = []
-            
-            # Extract all model names from various response formats
+
             if 'models' in data:
                 all_models = [m['name'] for m in data['models']]
             elif isinstance(data, list):
                 all_models = [m['name'] for m in data if 'name' in m]
-            
-            # Check if base model exists
+
             for m in all_models:
-                if m.startswith(base_model + ':') or m == base_model:
-                    print(f"✅ Found similar model: {m} - using this instead of {model_name}")
+                if m == model_name or m.startswith(model_name.split(':')[0] + ':'):
                     return True
-        
-        # If we need to pull the model, set a timeout
-        start_time = time.time()
-        
-        # Start the pull process
-        response = ollama.pull(model_name)
-        
-        # Check if pull was successful
-        elapsed_time = time.time() - start_time
-        print(f"✅ Successfully downloaded {model_name} in {elapsed_time:.1f} seconds")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error downloading model {model_name}: {e}")
-        
-        # Check if the model was partially downloaded
-        try:
-            print("Checking if model was partially downloaded...")
-            response = requests.get("http://localhost:11434/api/tags", timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                all_models = []
-                
-                # Extract model names
-                if 'models' in data:
-                    all_models = [m['name'] for m in data['models']]
-                elif isinstance(data, list):
-                    all_models = [m['name'] for m in data if 'name' in m]
-                
-                # Check if our model now exists
-                if model_name in all_models:
-                    print(f"✅ Model {model_name} appears to be downloaded despite error")
-                    return True
-                
-                # Try alternatives
-                base_model = model_name.split(':')[0]
-                for m in all_models:
-                    if m.startswith(base_model + ':') or m == base_model:
-                        print(f"✅ Found alternative model: {m} - using this instead of {model_name}")
-                        return True
-        except Exception as check_err:
-            print(f"Error checking model status: {check_err}")
-            
+            return False
+        else:
+            return False
+    except Exception:
         return False
 
-# Run benchmarks
+def download_model(model_name):
+    try:
+        print(f"⬇️ Downloading model: {model_name}...")
+        ollama.pull(model_name)
+        print(f"✅ Model {model_name} downloaded successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Error downloading model {model_name}: {e}")
+        return False
+
 def main():
-    # Check if Ollama is running by querying the version endpoint directly
     try:
         response = requests.get("http://localhost:11434/api/version")
         if response.status_code == 200:
@@ -257,27 +212,26 @@ def main():
         print(f"❌ Error connecting to Ollama server: {str(e)}")
         print("Please ensure Ollama is installed and running.")
         return
-    
-    # Get available models
-    available_models = get_available_models()
-    print(f"📋 Available models: {', '.join(available_models) if available_models else 'None'}")
-    
-    # For each model
+
     for model in MODELS:
-        # Check if model exists, pull if not
-        if model not in available_models:
+        if not is_model_available(model):
+            print(f"Model {model} not found locally.")
             success = download_model(model)
             if not success:
-                print(f"⚠️ Could not download {model}. Using fallback model {FALLBACK_MODEL}")
-                model = FALLBACK_MODEL
+                print(f"⚠️ Could not download {model}. Skipping.")
+                continue
         else:
-            print(f"✅ Model {model} is already available")
-        
-        # For each dataset
-        for dataset_name, subset, workload_type in DATASETS:
-            benchmark_model(model, dataset_name, subset, workload_type)
-    
-    print("\n✅ All benchmarks complete! Results saved to results/ollama_results.csv")
+            print(f"✅ Model {model} is available")
+
+        if MODE == "prefill":
+            for prefill in [512, 1024, 1536, 2048]:
+                for sample in range(3):
+                    benchmark_model(model, prefill, 100, "prefill")
+        elif MODE == "quant":
+            for sample in range(3):
+                benchmark_model(model, 1024, 500, "prefill")
+
+    print(f"\n✅ All {MODE} benchmarks complete! Results saved to {OUTPUT_CSV}")
 
 if __name__ == "__main__":
     main()

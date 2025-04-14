@@ -1,0 +1,10 @@
+model,input_tokens,generated_tokens,total_tokens,workload_type,workload_ratio,prompt_tps,generation_tps,load_time_s,total_time_s,on_device_energy_J,on_device_power_W,cloud_energy_J,cloud_power_W
+mistral:7b-instruct-q4_0,1024,175,1199,prefill,0.854,89.68,11.88,0.032,26.24,194.54,6.92,39360.345,1500.0
+mistral:7b-instruct-q4_0,1024,125,1149,prefill,0.891,1454.21,11.84,0.026,11.294,75.79,5.73,16941.13,1500.0
+mistral:7b-instruct-q4_0,1024,188,1212,prefill,0.845,1326.82,11.77,0.035,16.785,126.11,7.16,25177.649,1500.0
+mistral:7b-instruct-q5_1,1024,156,1180,prefill,0.868,20.92,1.29,12.476,182.82,1076.97,5.88,274229.257,1500.0
+mistral:7b-instruct-q5_1,1024,134,1158,prefill,0.884,100.81,0.91,0.093,157.495,650.97,4.07,236242.906,1500.0
+mistral:7b-instruct-q5_1,1024,124,1148,prefill,0.892,91.51,2.74,0.032,56.684,380.24,6.47,85025.43,1500.0
+mistral:7b-instruct-q8_0,1024,176,1200,prefill,0.853,11.79,0.05,12.039,3888.477,7674.99,1.97,5832714.985,1500.0
+mistral:7b-instruct-q8_0,1024,142,1166,prefill,0.878,42.39,0.05,0.101,3032.427,5504.98,1.81,4548640.872,1500.0
+mistral:7b-instruct-q8_0,1024,162,1186,prefill,0.863,41.08,0.05,0.04,3519.073,6393.27,1.82,5278608.89,1500.0
