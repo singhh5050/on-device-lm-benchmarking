@@ -15,7 +15,7 @@ Language model inference consists of two distinct phases:
 1. **Prefill (Input Processing)**: The initial processing of the prompt/input tokens
 2. **Decode (Generation)**: The sequential generation of each output token
 
-These phases have fundamentally different performance characteristics, and our analysis explores how they respond to different optimization strategies.
+These phases have fundamentally different performance characteristics. Ideally, this analysis would include optimization strategies for both, but sweeping across different decode-heavy lengths become difficult with Ollama's abstraction.
 
 ## Key Findings
 
